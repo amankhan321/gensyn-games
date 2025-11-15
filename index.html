@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Gensyn Ant Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            position: relative;
+        }
+        
+        /* FIXED: Gensyn logo pattern on outer blue background using REAL image */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: url("assets/gensyn_logo.png");
+            background-repeat: repeat;
+            background-size: 120px 120px;
+            opacity: 0.06;
+            pointer-events: none;
+        }
+        
+        #gameTitle {
+            color: #fff;
+            font-size: 3em;
+            font-weight: bold;
+            margin-bottom: 25px;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.4);
+            letter-spacing: 3px;
+            z-index: 10;
+        }
+        
+        #gameContainer {
+            position: relative;
+            z-index: 10;
+        }
+        
+        #gameCanvas {
+            background: linear-gradient(to bottom, 
+                #87CEEB 0%, 
+                #B0E0E6 50%, 
+                #E0F6FF 100%);
+            border: 6px solid #2c3e50;
+            border-radius: 12px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+            cursor: pointer;
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        
+        #scoreDisplay {
+            color: #fff;
+            font-size: 1.4em;
+            margin-top: 20px;
+            text-align: center;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.4);
+            z-index: 10;
+        }
+        
+        .score-row {
+            display: inline-block;
+            margin: 0 20px;
+            font-weight: bold;
+        }
+        
+        @media (max-width: 768px) {
+            #gameTitle {
+                font-size: 2em;
+                margin-bottom: 15px;
+            }
+            #scoreDisplay {
+                font-size: 1.1em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameTitle">GENSYN ANT GAME</div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="900" height="300"></canvas>
+    </div>
+    <div id="scoreDisplay">
+        <span class="score-row">Score: <span id="score">0</span></span>
+        <span class="score-row">High Score: <span id="highScore">0</span></span>
+    </div>
+
+    <script>
+        /* ================================================================
+         * GENSYN ANT GAME - Chrome Dino Style Runner
+         * ================================================================
+         * CRITICAL: This version uses the REAL gensyn_logo.png image file
+         * with NO manual drawing, NO color changes, NO tinting.
+         * The image is loaded and drawn EXACTLY as-is using ctx.drawImage().
+         * ================================================================
+         */
+
+        // ================================================================
+        // CANVAS & CONTEXT SETUP
+        // ================================================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const CANVAS_WIDTH = 900;
+        const CANVAS_HEIGHT = 300;
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        // ================================================================
+        // LOAD GENSYN LOGO IMAGE - MANDATORY
+        // ================================================================
+        let gensynLogoImg = new Image();
+        gensynLogoImg.src = "assets/gensyn_logo.png";
+        let logoLoaded = false;
+
+        gensynLogoImg.onload = () => {
+            logoLoaded = true;
+            console.log("Gensyn logo loaded successfully");
+        };
+
+        gensynLogoImg.onerror = () => {
+            console.error("Failed to load assets/gensyn_logo.png - Make sure the file exists in the assets folder");
+        };
+
+        // ================================================================
+        // GAME CONFIGURATION
+        // ================================================================
+        const CONFIG = {
+            GRAVITY: 0.65,
+            JUMP_STRENGTH: -13.5,
+            INITIAL_GAME_SPEED: 5,
+            SPEED_INCREASE_RATE: 0.4,
+            SPEED_INCREASE_INTERVAL: 10000,
+            MAX_GAME_SPEED: 14,
+            OBSTACLE_MIN_SPAWN_TIME: 900,
+            OBSTACLE_MAX_SPAWN_TIME: 1600,
+            OBSTACLE_BASE_SIZE: 35,              // REDUCED: 30-40px range
+            OBSTACLE_MIN_SCALE: 0.85,            // REDUCED: Smaller variation
+            OBSTACLE_MAX_SCALE: 1.15,            // REDUCED: Smaller variation
+            SCORE_INCREMENT: 0.15,
+            POINTS_PER_OBSTACLE: 15,
+            GROUND_HEIGHT: 60,
+            ANT_WIDTH: 110,
+            ANT_HEIGHT: 130,
+            ANT_RUN_FRAME_SPEED: 6,
+        };
+
+        // ================================================================
+        // GAME STATE
+        // ================================================================
+        let gameState = 'start';
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('gensynAntHighScore')) || 0;
+        let gameSpeed = CONFIG.INITIAL_GAME_SPEED;
+        let lastSpeedIncrease = Date.now();
+        
+        document.getElementById('highScore').textContent = highScore;
+
+        // ================================================================
+        // DRAWING FUNCTIONS
+        // ================================================================
+        
+        // Draw ant character (unchanged)
+        function drawAnt(x, y, width, height, frameIndex, isJumping) {
+            ctx.save();
+            
+            const centerX = x + width / 2;
+            const centerY = y + height / 2;
+            
+            const bobOffset = isJumping ? 0 : Math.sin(frameIndex * Math.PI / 1.5) * 3;
+            const rotation = isJumping ? -5 : (frameIndex - 1) * 2;
+            
+            ctx.translate(centerX, centerY + bobOffset);
+            ctx.rotate((rotation * Math.PI) / 180);
+            
+            // Body (abdomen)
+            ctx.fillStyle = '#D2691E';
+            ctx.beginPath();
+            ctx.ellipse(0, 15, 22, 28, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Thorax
+            ctx.fillStyle = '#CD853F';
+            ctx.beginPath();
+            ctx.ellipse(0, -5, 20, 25, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Head
+            ctx.fillStyle = '#D2691E';
+            ctx.beginPath();
+            ctx.arc(0, -35, 22, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Antennae
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-8, -45);
+            ctx.lineTo(-18, -60);
+            ctx.moveTo(8, -45);
+            ctx.lineTo(18, -60);
+            ctx.stroke();
+            
+            // Antenna tips
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.arc(-18, -60, 4, 0, Math.PI * 2);
+            ctx.arc(18, -60, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Eyes
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(-8, -35, 4, 0, Math.PI * 2);
+            ctx.arc(8, -35, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Legs (animated)
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            
+            const legOffset = isJumping ? 0 : (frameIndex % 2) * 10;
+            
+            // Front legs
+            ctx.beginPath();
+            ctx.moveTo(-15, -10);
+            ctx.lineTo(-25 - legOffset, 10);
+            ctx.moveTo(15, -10);
+            ctx.lineTo(25 + legOffset, 10);
+            ctx.stroke();
+            
+            // Middle legs
+            ctx.beginPath();
+            ctx.moveTo(-18, 5);
+            ctx.lineTo(-30 + legOffset, 25);
+            ctx.moveTo(18, 5);
+            ctx.lineTo(30 - legOffset, 25);
+            ctx.stroke();
+            
+            // Back legs
+            ctx.beginPath();
+            ctx.moveTo(-15, 20);
+            ctx.lineTo(-25 - legOffset, 40);
+            ctx.moveTo(15, 20);
+            ctx.lineTo(25 + legOffset, 40);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+        
+        // FIXED: Draw large background Gensyn logo using REAL image ONLY
+        function drawBackgroundLogo() {
+            if (!logoLoaded) return; // Wait for image to load
+            
+            const logoSize = 250;
+            const x = (CANVAS_WIDTH - logoSize) / 2;
+            const y = (CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT - logoSize) / 2;
+            const opacity = 0.10; // 10% opacity
+            
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            // MANDATORY: Use ctx.drawImage with REAL gensyn_logo.png
+            ctx.drawImage(gensynLogoImg, x, y, logoSize, logoSize);
+            ctx.restore();
+        }
+
+        // ================================================================
+        // UTILITY FUNCTIONS
+        // ================================================================
+        function randomInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        function randomFloat(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // ================================================================
+        // PLAYER CLASS
+        // ================================================================
+        class Player {
+            constructor() {
+                this.width = CONFIG.ANT_WIDTH;
+                this.height = CONFIG.ANT_HEIGHT;
+                this.x = 120;
+                this.groundY = CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT - this.height;
+                this.y = this.groundY;
+                this.velocityY = 0;
+                this.isJumping = false;
+                this.frameIndex = 0;
+                this.frameTimer = 0;
+                this.totalRunFrames = 3;
+            }
+
+            update() {
+                this.velocityY += CONFIG.GRAVITY;
+                this.y += this.velocityY;
+
+                if (this.y >= this.groundY) {
+                    this.y = this.groundY;
+                    this.velocityY = 0;
+                    this.isJumping = false;
+                }
+
+                if (!this.isJumping && gameState === 'running') {
+                    this.frameTimer++;
+                    if (this.frameTimer >= CONFIG.ANT_RUN_FRAME_SPEED) {
+                        this.frameTimer = 0;
+                        this.frameIndex = (this.frameIndex + 1) % this.totalRunFrames;
+                    }
+                }
+            }
+
+            jump() {
+                if (!this.isJumping) {
+                    this.velocityY = CONFIG.JUMP_STRENGTH;
+                    this.isJumping = true;
+                }
+            }
+
+            draw() {
+                drawAnt(this.x, this.y, this.width, this.height, this.frameIndex, this.isJumping);
+            }
+
+            getHitbox() {
+                const padding = 20;
+                return {
+                    x: this.x + padding,
+                    y: this.y + padding,
+                    width: this.width - padding * 2,
+                    height: this.height - padding * 2
+                };
+            }
+
+            reset() {
+                this.y = this.groundY;
+                this.velocityY = 0;
+                this.isJumping = false;
+                this.frameIndex = 0;
+                this.frameTimer = 0;
+            }
+        }
+
+        // ================================================================
+        // OBSTACLE CLASS - FIXED to use REAL image ONLY
+        // ================================================================
+        class Obstacle {
+            constructor() {
+                // REDUCED: Smaller obstacles (30-40px)
+                this.scale = randomFloat(CONFIG.OBSTACLE_MIN_SCALE, CONFIG.OBSTACLE_MAX_SCALE);
+                this.width = CONFIG.OBSTACLE_BASE_SIZE * this.scale;
+                this.height = CONFIG.OBSTACLE_BASE_SIZE * this.scale;
+                
+                this.x = CANVAS_WIDTH + 50;
+                this.y = CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT - this.height;
+                
+                this.markedForDeletion = false;
+                this.passed = false;
+            }
+
+            update() {
+                this.x -= gameSpeed;
+
+                if (this.x + this.width < 0) {
+                    this.markedForDeletion = true;
+                }
+
+                if (!this.passed && this.x + this.width < player.x) {
+                    this.passed = true;
+                    score += CONFIG.POINTS_PER_OBSTACLE;
+                }
+            }
+
+            draw() {
+                if (!logoLoaded) {
+                    // Fallback: simple placeholder while loading
+                    ctx.fillStyle = '#FFD5E5';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    return;
+                }
+                
+                // MANDATORY: Use REAL gensyn_logo.png with ctx.drawImage
+                // NO manual drawing, NO color changes, NO tinting
+                ctx.drawImage(gensynLogoImg, this.x, this.y, this.width, this.height);
+            }
+
+            getHitbox() {
+                const padding = 6; // Smaller padding for smaller obstacles
+                return {
+                    x: this.x + padding,
+                    y: this.y + padding,
+                    width: this.width - padding * 2,
+                    height: this.height - padding * 2
+                };
+            }
+        }
+
+        // ================================================================
+        // CLOUD CLASS
+        // ================================================================
+        class Cloud {
+            constructor() {
+                this.x = randomInt(0, CANVAS_WIDTH);
+                this.y = randomInt(20, 120);
+                this.width = randomInt(60, 120);
+                this.height = this.width * 0.6;
+                this.speed = randomFloat(0.3, 0.8);
+                this.opacity = randomFloat(0.3, 0.6);
+            }
+
+            update() {
+                if (gameState === 'running') {
+                    this.x -= this.speed;
+                    if (this.x + this.width < 0) {
+                        this.x = CANVAS_WIDTH + 50;
+                        this.y = randomInt(20, 120);
+                    }
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.opacity;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.width * 0.25, 0, Math.PI * 2);
+                ctx.arc(this.x + this.width * 0.3, this.y - this.height * 0.15, this.width * 0.35, 0, Math.PI * 2);
+                ctx.arc(this.x + this.width * 0.65, this.y, this.width * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // ================================================================
+        // OBSTACLE SPAWNER
+        // ================================================================
+        class ObstacleSpawner {
+            constructor() {
+                this.timer = 0;
+                this.nextSpawnTime = randomInt(CONFIG.OBSTACLE_MIN_SPAWN_TIME, CONFIG.OBSTACLE_MAX_SPAWN_TIME);
+            }
+
+            update(deltaTime) {
+                if (gameState !== 'running') return;
+                this.timer += deltaTime;
+                if (this.timer >= this.nextSpawnTime) {
+                    obstacles.push(new Obstacle());
+                    this.timer = 0;
+                    this.nextSpawnTime = randomInt(CONFIG.OBSTACLE_MIN_SPAWN_TIME, CONFIG.OBSTACLE_MAX_SPAWN_TIME);
+                }
+            }
+
+            reset() {
+                this.timer = 0;
+                this.nextSpawnTime = randomInt(CONFIG.OBSTACLE_MIN_SPAWN_TIME, CONFIG.OBSTACLE_MAX_SPAWN_TIME);
+            }
+        }
+
+        // ================================================================
+        // INPUT HANDLER
+        // ================================================================
+        class InputHandler {
+            constructor() {
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space') {
+                        e.preventDefault();
+                        this.handleInput();
+                    }
+                });
+                
+                canvas.addEventListener('click', () => this.handleInput());
+                canvas.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.handleInput();
+                });
+            }
+
+            handleInput() {
+                if (gameState === 'start') {
+                    game.start();
+                } else if (gameState === 'running') {
+                    player.jump();
+                } else if (gameState === 'gameOver') {
+                    game.restart();
+                }
+            }
+        }
+
+        // ================================================================
+        // GAME MANAGER
+        // ================================================================
+        class Game {
+            constructor() {
+                this.lastTime = 0;
+                this.clouds = [];
+                for (let i = 0; i < 5; i++) {
+                    this.clouds.push(new Cloud());
+                }
+            }
+
+            start() {
+                gameState = 'running';
+                score = 0;
+                gameSpeed = CONFIG.INITIAL_GAME_SPEED;
+                lastSpeedIncrease = Date.now();
+                obstacles.length = 0;
+                spawner.reset();
+                player.reset();
+            }
+
+            restart() {
+                this.start();
+            }
+
+            update(deltaTime) {
+                this.clouds.forEach(cloud => cloud.update());
+                if (gameState !== 'running') return;
+
+                player.update();
+                spawner.update(deltaTime);
+
+                obstacles.forEach((obstacle, index) => {
+                    obstacle.update();
+                    if (checkCollision(player.getHitbox(), obstacle.getHitbox())) {
+                        this.gameOver();
+                    }
+                    if (obstacle.markedForDeletion) {
+                        obstacles.splice(index, 1);
+                    }
+                });
+
+                if (Date.now() - lastSpeedIncrease >= CONFIG.SPEED_INCREASE_INTERVAL) {
+                    if (gameSpeed < CONFIG.MAX_GAME_SPEED) {
+                        gameSpeed += CONFIG.SPEED_INCREASE_RATE;
+                    }
+                    lastSpeedIncrease = Date.now();
+                }
+
+                score += CONFIG.SCORE_INCREMENT;
+                document.getElementById('score').textContent = Math.floor(score);
+            }
+
+            gameOver() {
+                gameState = 'gameOver';
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                if (score > highScore) {
+                    highScore = Math.floor(score);
+                    localStorage.setItem('gensynAntHighScore', highScore);
+                    document.getElementById('highScore').textContent = highScore;
+                }
+            }
+
+            drawGround() {
+                const groundGradient = ctx.createLinearGradient(0, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT, 0, CANVAS_HEIGHT);
+                groundGradient.addColorStop(0, '#228B22');
+                groundGradient.addColorStop(1, '#1a6b1a');
+                ctx.fillStyle = groundGradient;
+                ctx.fillRect(0, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT, CANVAS_WIDTH, CONFIG.GROUND_HEIGHT);
+
+                ctx.strokeStyle = '#0d4d0d';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(0, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT);
+                ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT);
+                ctx.stroke();
+
+                ctx.strokeStyle = '#2a9d2a';
+                ctx.lineWidth = 2;
+                for (let i = 0; i < CANVAS_WIDTH; i += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT);
+                    ctx.lineTo(i + 5, CANVAS_HEIGHT - CONFIG.GROUND_HEIGHT - 10);
+                    ctx.stroke();
+                }
+            }
+
+            drawUI() {
+                ctx.save();
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+                ctx.shadowBlur = 4;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 26px Arial';
+                ctx.textAlign = 'right';
+                ctx.fillText(`Score: ${Math.floor(score)}`, CANVAS_WIDTH - 20, 35);
+                ctx.restore();
+
+                if (gameState === 'start') {
+                    this.drawMessage('Press SPACE or Tap to Start', '');
+                } else if (gameState === 'gameOver') {
+                    this.drawMessage('GAME OVER', `Final Score: ${Math.floor(score)} | Press SPACE or Tap to Restart`);
+                }
+            }
+
+            drawMessage(mainText, subText) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(mainText, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30);
+                if (subText) {
+                    ctx.font = '22px Arial';
+                    ctx.fillText(subText, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+                }
+            }
+
+            draw() {
+                ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                // Draw clouds
+                this.clouds.forEach(cloud => cloud.draw());
+                
+                // FIXED: Draw background logo using REAL gensyn_logo.png
+                drawBackgroundLogo();
+                
+                // Draw ground
+                this.drawGround();
+                
+                // FIXED: Obstacles use REAL gensyn_logo.png via ctx.drawImage
+                obstacles.forEach(obstacle => obstacle.draw());
+                
+                // Draw player
+                player.draw();
+                
+                // Draw UI
+                this.drawUI();
+            }
+
+            loop(timestamp) {
+                const deltaTime = timestamp - this.lastTime;
+                this.lastTime = timestamp;
+                this.update(deltaTime);
+                this.draw();
+                requestAnimationFrame((t) => this.loop(t));
+            }
+        }
+
+        // ================================================================
+        // INITIALIZE & START
+        // ================================================================
+        const player = new Player();
+        const obstacles = [];
+        const spawner = new ObstacleSpawner();
+        const inputHandler = new InputHandler();
+        const game = new Game();
+
+        function resizeCanvas() {
+            const scale = Math.min((window.innerWidth - 40) / CANVAS_WIDTH, (window.innerHeight - 250) / CANVAS_HEIGHT, 1);
+            canvas.style.width = (CANVAS_WIDTH * scale) + 'px';
+            canvas.style.height = (CANVAS_HEIGHT * scale) + 'px';
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        game.loop(0);
+        
+        /* ================================================================
+         * ASSET SETUP INSTRUCTIONS
+         * ================================================================
+         * 
+         * FOLDER STRUCTURE REQUIRED:
+         * YOUR_PROJECT/
+         *   ├── index.html (this file)
+         *   └── assets/
+         *       └── gensyn_logo.png (your Gensyn logo image)
+         * 
+         * The game REQUIRES the real gensyn_logo.png file to be placed
+         * in the assets folder. It will NOT work without it.
+         * 
+         * The logo is used in THREE places:
+         * 1. Obstacles (small, 30-40px, full opacity)
+         * 2. Game background (large, 250px, 10% opacity)
+         * 3. Blue outer background (CSS pattern, 6% opacity)
+         * 
+         * All three use the EXACT same image file with NO color changes.
+         * ================================================================
+         */
+    </script>
+</body>
+</html>
